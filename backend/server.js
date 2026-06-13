@@ -20,22 +20,56 @@ const app = express();
 app.use(
   cors({
     origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+
       const allowedOrigins = [
         'http://localhost:5173',
         'http://localhost:3000',
+        'http://localhost:5000',
         'https://linkforge-three.vercel.app',
+        'https://linkforge-fymw.onrender.com',
         process.env.CLIENT_URL,
       ].filter(Boolean);
 
-      if (!origin || allowedOrigins.includes(origin)) {
+      const isVercelPreviewURL =
+        origin.includes('linkforge') &&
+        origin.endsWith('.vercel.app');
+
+      const isRenderURL = origin.endsWith('.onrender.com');
+
+      const isLocalhost =
+        origin.startsWith('http://localhost:') ||
+        origin.startsWith('http://127.0.0.1:');
+
+      if (
+        allowedOrigins.includes(origin) ||
+        isVercelPreviewURL ||
+        isRenderURL ||
+        isLocalhost
+      ) {
         callback(null, true);
       } else {
+        console.error('CORS blocked origin:', origin);
         callback(new Error('Not allowed by CORS: ' + origin));
       }
     },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: [
+      'GET',
+      'POST',
+      'PUT',
+      'PATCH',
+      'DELETE',
+      'OPTIONS',
+    ],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Accept',
+      'Origin',
+    ],
+    maxAge: 86400,
   })
 );
 
