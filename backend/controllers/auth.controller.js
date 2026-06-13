@@ -71,7 +71,6 @@ const register = async (req, res) => {
       console.error('=== SIGNUP EMAIL FAILED ===');
       console.error('Error:', emailError.message);
       console.error('To:', email);
-      console.error('RESEND_API_KEY set:', !!process.env.RESEND_API_KEY);
       console.error('===========================');
       await User.findByIdAndDelete(user._id);
       return res.status(500).json({
@@ -161,7 +160,6 @@ const login = async (req, res) => {
       console.error('=== LOGIN EMAIL FAILED ===');
       console.error('Error:', emailError.message);
       console.error('To:', email);
-      console.error('RESEND_API_KEY set:', !!process.env.RESEND_API_KEY);
       console.error('==========================');
       return res.status(500).json({
         success: false,

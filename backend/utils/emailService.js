@@ -1,15 +1,63 @@
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 
-// Initialize Resend client
-// Resend uses HTTPS — never blocked by Render free plan
-const getResendClient = () => {
-  if (!process.env.RESEND_API_KEY) {
-    throw new Error(
-      'RESEND_API_KEY environment variable is not set. ' +
-      'Please add it to your .env file and Render environment.'
-    );
+// Initialize Nodemailer transporter for Brevo SMTP
+const getTransporter = () => {
+  const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true';
+
+  // In production, we must use Brevo SMTP Relay
+  if (isProduction) {
+    const user = process.env.BREVO_USER || process.env.EMAIL_USER;
+    const pass = process.env.BREVO_SMTP_KEY || process.env.EMAIL_APP_PASSWORD;
+
+    if (!user || !pass) {
+      throw new Error('Brevo SMTP credentials are not set.');
+    }
+
+    return nodemailer.createTransport({
+      host: 'smtp-relay.brevo.com',
+      port: 587,
+      secure: false, // true for 465, false for 587
+      auth: {
+        user: user,
+        pass: pass,
+      },
+      connectionTimeout: 10000, // 10 seconds timeout
+    });
   }
-  return new Resend(process.env.RESEND_API_KEY);
+
+  // In local development, use Gmail SMTP as a working fallback
+  const gmailUser = process.env.EMAIL_USER;
+  const gmailPass = process.env.EMAIL_APP_PASSWORD;
+
+  if (gmailUser && gmailPass) {
+    return nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: gmailUser,
+        pass: gmailPass,
+      },
+      connectionTimeout: 10000, // 10 seconds timeout
+    });
+  }
+
+  // Fallback to Brevo local key if Gmail is not configured
+  const brevoUser = process.env.BREVO_USER;
+  const brevoPass = process.env.BREVO_SMTP_KEY;
+
+  if (brevoUser && brevoPass) {
+    return nodemailer.createTransport({
+      host: 'smtp-relay.brevo.com',
+      port: 587,
+      secure: false,
+      auth: {
+        user: brevoUser,
+        pass: brevoPass,
+      },
+      connectionTimeout: 10000,
+    });
+  }
+
+  throw new Error('No valid SMTP credentials found for local development.');
 };
 
 // Generate a 6-digit OTP
@@ -191,25 +239,21 @@ const getLoginEmailHTML = (userName, otp) => `
 // Send OTP email for signup verification
 const sendSignupOTPEmail = async (toEmail, userName, otp) => {
   try {
-    console.log('Attempting to send signup OTP email to:', toEmail);
-    console.log('RESEND_API_KEY set:', !!process.env.RESEND_API_KEY);
+    console.log('Attempting to send signup OTP email via Brevo SMTP to:', toEmail);
 
-    const resend = getResendClient();
+    const transporter = getTransporter();
+    const fromEmail = process.env.BREVO_USER || process.env.EMAIL_USER || 'hariprasathdlhdlh@gmail.com';
+    const fromName = process.env.EMAIL_FROM_NAME || 'LinkForge';
 
-    const { data, error } = await resend.emails.send({
-      from: 'LinkForge <onboarding@resend.dev>',
-      to: [toEmail],
+    const info = await transporter.sendMail({
+      from: `"${fromName}" <${fromEmail}>`,
+      to: toEmail,
       subject: 'LinkForge — Verify Your Email Address',
       html: getSignupEmailHTML(userName, otp),
     });
 
-    if (error) {
-      console.error('Resend API error on signup:', JSON.stringify(error));
-      throw new Error('Resend error: ' + JSON.stringify(error));
-    }
-
-    console.log('Signup OTP email sent successfully. ID:', data?.id);
-    return data;
+    console.log('Signup OTP email sent successfully. Message ID:', info.messageId);
+    return { id: info.messageId };
   } catch (error) {
     console.error('sendSignupOTPEmail failed:', error.message);
     throw new Error(
@@ -221,25 +265,21 @@ const sendSignupOTPEmail = async (toEmail, userName, otp) => {
 // Send OTP email for login verification
 const sendLoginOTPEmail = async (toEmail, userName, otp) => {
   try {
-    console.log('Attempting to send login OTP email to:', toEmail);
-    console.log('RESEND_API_KEY set:', !!process.env.RESEND_API_KEY);
+    console.log('Attempting to send login OTP email via Brevo SMTP to:', toEmail);
 
-    const resend = getResendClient();
+    const transporter = getTransporter();
+    const fromEmail = process.env.BREVO_USER || process.env.EMAIL_USER || 'hariprasathdlhdlh@gmail.com';
+    const fromName = process.env.EMAIL_FROM_NAME || 'LinkForge';
 
-    const { data, error } = await resend.emails.send({
-      from: 'LinkForge <onboarding@resend.dev>',
-      to: [toEmail],
+    const info = await transporter.sendMail({
+      from: `"${fromName}" <${fromEmail}>`,
+      to: toEmail,
       subject: 'LinkForge — Login Verification Code',
       html: getLoginEmailHTML(userName, otp),
     });
 
-    if (error) {
-      console.error('Resend API error on login:', JSON.stringify(error));
-      throw new Error('Resend error: ' + JSON.stringify(error));
-    }
-
-    console.log('Login OTP email sent successfully. ID:', data?.id);
-    return data;
+    console.log('Login OTP email sent successfully. Message ID:', info.messageId);
+    return { id: info.messageId };
   } catch (error) {
     console.error('sendLoginOTPEmail failed:', error.message);
     throw new Error(

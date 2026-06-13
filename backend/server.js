@@ -17,6 +17,9 @@ const { generalRateLimiter } = require('./middleware/rateLimiter');
 
 const app = express();
 
+// Trust proxy to ensure express-rate-limit captures client IPs correctly in production (Render)
+app.set('trust proxy', 1);
+
 app.use(
   cors({
     origin: function (origin, callback) {
@@ -29,7 +32,9 @@ app.use(
         'https://linkforge-three.vercel.app',
         'https://linkforge-fymw.onrender.com',
         process.env.CLIENT_URL,
-      ].filter(Boolean);
+      ]
+        .filter(Boolean)
+        .map(url => url.replace(/\/$/, '')); // Strip trailing slash for exact matching
 
       const isVercelPreviewURL =
         origin.includes('linkforge') &&
