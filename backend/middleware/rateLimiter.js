@@ -39,6 +39,8 @@ const generalRateLimiter = rateLimit({
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) =>
+    req.path.startsWith('/auth') || req.originalUrl.startsWith('/api/auth'),
   message: {
     success: false,
     message:
@@ -48,12 +50,13 @@ const generalRateLimiter = rateLimit({
 });
 
 // Rate limiter for OTP send route
-// Max 3 OTP requests per IP per 10 minutes
+// Max 10 OTP actions per IP per 10 minutes
 const otpRateLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
-  max: 3,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  skipSuccessfulRequests: true,
   message: {
     success: false,
     message:

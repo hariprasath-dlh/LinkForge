@@ -1,63 +1,100 @@
 const nodemailer = require('nodemailer');
 
-// Initialize Nodemailer transporter for Brevo SMTP
+let transporter;
+
+const smtpConfig = () => {
+  const user = (
+    process.env.BREVO_SMTP_LOGIN ||
+    process.env.BREVO_USER ||
+    process.env.SMTP_USER ||
+    process.env.EMAIL_USER ||
+    ''
+  ).trim();
+  const pass = (
+    process.env.BREVO_SMTP_KEY ||
+    process.env.BREVO_SMTP_PASSWORD ||
+    process.env.SMTP_PASS ||
+    process.env.EMAIL_APP_PASSWORD ||
+    ''
+  ).trim();
+
+  if (!user || !pass) {
+    throw new Error('SMTP credentials are not configured.');
+  }
+
+  return {
+    host: process.env.SMTP_HOST || 'smtp-relay.brevo.com',
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: { user, pass },
+    pool: true,
+    maxConnections: 3,
+    maxMessages: 100,
+    connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 30000),
+    greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 15000),
+    socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 45000),
+  };
+};
+
 const getTransporter = () => {
-  const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true';
+  if (!transporter) {
+    const config = smtpConfig();
+    console.log('SMTP transporter configured', {
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
+      authUser: config.auth.user,
+      from:
+        process.env.EMAIL_FROM ||
+        process.env.BREVO_FROM_EMAIL ||
+        process.env.BREVO_USER ||
+        process.env.EMAIL_USER,
+    });
+    transporter = nodemailer.createTransport(config);
+  }
+  return transporter;
+};
 
-  // In production, we must use Brevo SMTP Relay
-  if (isProduction) {
-    const user = process.env.BREVO_USER || process.env.EMAIL_USER;
-    const pass = process.env.BREVO_SMTP_KEY || process.env.EMAIL_APP_PASSWORD;
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    if (!user || !pass) {
-      throw new Error('Brevo SMTP credentials are not set.');
+const isAuthenticationError = (error) =>
+  error?.responseCode === 535 ||
+  /Invalid login|Authentication failed|Username and Password not accepted/i.test(
+    error?.message || ''
+  );
+
+const sendWithRetry = async (mailOptions, context) => {
+  const maxAttempts = Number(process.env.SMTP_RETRY_ATTEMPTS || 3);
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const info = await getTransporter().sendMail(mailOptions);
+      console.log(`${context} email accepted by SMTP`, {
+        messageId: info.messageId,
+        accepted: info.accepted,
+        rejected: info.rejected,
+        attempt,
+      });
+      return { id: info.messageId };
+    } catch (error) {
+      lastError = error;
+      console.error(`${context} email attempt ${attempt} failed:`, error.message);
+
+      if (isAuthenticationError(error)) {
+        transporter = null;
+        throw new Error(
+          `${context} email authentication failed. Check BREVO_SMTP_LOGIN/BREVO_USER and BREVO_SMTP_KEY in environment variables.`
+        );
+      }
+
+      if (attempt < maxAttempts) {
+        await delay(750 * attempt);
+      }
     }
-
-    return nodemailer.createTransport({
-      host: 'smtp-relay.brevo.com',
-      port: 587,
-      secure: false, // true for 465, false for 587
-      auth: {
-        user: user,
-        pass: pass,
-      },
-      connectionTimeout: 10000, // 10 seconds timeout
-    });
   }
 
-  // In local development, use Gmail SMTP as a working fallback
-  const gmailUser = process.env.EMAIL_USER;
-  const gmailPass = process.env.EMAIL_APP_PASSWORD;
-
-  if (gmailUser && gmailPass) {
-    return nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: gmailUser,
-        pass: gmailPass,
-      },
-      connectionTimeout: 10000, // 10 seconds timeout
-    });
-  }
-
-  // Fallback to Brevo local key if Gmail is not configured
-  const brevoUser = process.env.BREVO_USER;
-  const brevoPass = process.env.BREVO_SMTP_KEY;
-
-  if (brevoUser && brevoPass) {
-    return nodemailer.createTransport({
-      host: 'smtp-relay.brevo.com',
-      port: 587,
-      secure: false,
-      auth: {
-        user: brevoUser,
-        pass: brevoPass,
-      },
-      connectionTimeout: 10000,
-    });
-  }
-
-  throw new Error('No valid SMTP credentials found for local development.');
+  throw new Error(`${context} email failed after ${maxAttempts} attempt(s): ${lastError.message}`);
 };
 
 // Generate a 6-digit OTP
@@ -83,8 +120,8 @@ const getSignupEmailHTML = (userName, otp) => `
                 padding:32px;text-align:center;
                 border-bottom:1px solid #1E2D40;">
       <h1 style="margin:0;color:#F59E0B;font-size:28px;
-                  font-weight:700;letter-spacing:-0.5px;">
-        🔨 LinkForge
+                  font-weight:700;letter-spacing:0;">
+        LinkForge
       </h1>
       <p style="margin:8px 0 0;color:#94A3B8;font-size:14px;">
         Craft Short Links. Track Every Click.
@@ -121,10 +158,10 @@ const getSignupEmailHTML = (userName, otp) => `
                   border-left:4px solid #F59E0B;">
         <p style="margin:0;color:#94A3B8;
                   font-size:13px;line-height:2;">
-          ⏱️ Expires in
+          Expires in
           <strong style="color:#F1F5F9;">10 minutes</strong><br>
-          🔒 Never share this code with anyone<br>
-          ❌ Ignore this email if you did not sign up
+          Never share this code with anyone<br>
+          Ignore this email if you did not sign up
         </p>
       </div>
 
@@ -133,18 +170,6 @@ const getSignupEmailHTML = (userName, otp) => `
         Sent by LinkForge. Do not reply to this email.
       </p>
     </div>
-
-    <div style="padding:16px 32px;background:#0A0E1A;
-                border-top:1px solid #1E2D40;text-align:center;">
-      <p style="margin:0;color:#475569;font-size:11px;">
-        This project is a part of a hackathon run by
-        <a href="https://katomaran.com"
-           style="color:#F59E0B;text-decoration:none;">
-          katomaran.com
-        </a>
-      </p>
-    </div>
-
   </div>
 </body>
 </html>
@@ -168,8 +193,8 @@ const getLoginEmailHTML = (userName, otp) => `
                 padding:32px;text-align:center;
                 border-bottom:1px solid #1E2D40;">
       <h1 style="margin:0;color:#F59E0B;font-size:28px;
-                  font-weight:700;letter-spacing:-0.5px;">
-        🔨 LinkForge
+                  font-weight:700;letter-spacing:0;">
+        LinkForge
       </h1>
       <p style="margin:8px 0 0;color:#94A3B8;font-size:14px;">
         Craft Short Links. Track Every Click.
@@ -183,9 +208,7 @@ const getLoginEmailHTML = (userName, otp) => `
       </h2>
       <p style="margin:0 0 24px;color:#94A3B8;
                 font-size:14px;line-height:1.6;">
-        Hi ${userName}, someone is trying to login to your
-        LinkForge account. Use the code below to confirm
-        it is you.
+        Hi ${userName}, use the code below to complete your LinkForge login.
       </p>
 
       <div style="background:#1C2333;border:2px solid #F59E0B;
@@ -207,10 +230,10 @@ const getLoginEmailHTML = (userName, otp) => `
                   border-left:4px solid #F59E0B;">
         <p style="margin:0;color:#94A3B8;
                   font-size:13px;line-height:2;">
-          ⏱️ Expires in
+          Expires in
           <strong style="color:#F1F5F9;">10 minutes</strong><br>
-          🔒 Never share this code with anyone<br>
-          ❌ Change your password if you did not request this
+          Never share this code with anyone<br>
+          Change your password if you did not request this
         </p>
       </div>
 
@@ -219,73 +242,50 @@ const getLoginEmailHTML = (userName, otp) => `
         Sent by LinkForge. Do not reply to this email.
       </p>
     </div>
-
-    <div style="padding:16px 32px;background:#0A0E1A;
-                border-top:1px solid #1E2D40;text-align:center;">
-      <p style="margin:0;color:#475569;font-size:11px;">
-        This project is a part of a hackathon run by
-        <a href="https://katomaran.com"
-           style="color:#F59E0B;text-decoration:none;">
-          katomaran.com
-        </a>
-      </p>
-    </div>
-
   </div>
 </body>
 </html>
 `;
 
-// Send OTP email for signup verification
-const sendSignupOTPEmail = async (toEmail, userName, otp) => {
-  try {
-    console.log('Attempting to send signup OTP email via Brevo SMTP to:', toEmail);
+const mailSender = () => {
+  const fromEmail =
+    process.env.EMAIL_FROM ||
+    process.env.BREVO_FROM_EMAIL ||
+    process.env.BREVO_USER ||
+    process.env.EMAIL_USER;
+  const fromName = process.env.EMAIL_FROM_NAME || 'LinkForge';
 
-    const transporter = getTransporter();
-    const fromEmail = process.env.BREVO_USER || process.env.EMAIL_USER || 'hariprasathdlhdlh@gmail.com';
-    const fromName = process.env.EMAIL_FROM_NAME || 'LinkForge';
-
-    const info = await transporter.sendMail({
-      from: `"${fromName}" <${fromEmail}>`,
-      to: toEmail,
-      subject: 'LinkForge — Verify Your Email Address',
-      html: getSignupEmailHTML(userName, otp),
-    });
-
-    console.log('Signup OTP email sent successfully. Message ID:', info.messageId);
-    return { id: info.messageId };
-  } catch (error) {
-    console.error('sendSignupOTPEmail failed:', error.message);
-    throw new Error(
-      'Failed to send verification email: ' + error.message
-    );
+  if (!fromEmail) {
+    throw new Error('EMAIL_FROM or BREVO_USER must be configured.');
   }
+
+  return `"${fromName}" <${fromEmail}>`;
 };
 
-// Send OTP email for login verification
-const sendLoginOTPEmail = async (toEmail, userName, otp) => {
-  try {
-    console.log('Attempting to send login OTP email via Brevo SMTP to:', toEmail);
-
-    const transporter = getTransporter();
-    const fromEmail = process.env.BREVO_USER || process.env.EMAIL_USER || 'hariprasathdlhdlh@gmail.com';
-    const fromName = process.env.EMAIL_FROM_NAME || 'LinkForge';
-
-    const info = await transporter.sendMail({
-      from: `"${fromName}" <${fromEmail}>`,
+const sendSignupOTPEmail = async (toEmail, userName, otp) => {
+  console.log('Sending signup OTP email via SMTP', { to: toEmail });
+  return sendWithRetry(
+    {
+      from: mailSender(),
       to: toEmail,
-      subject: 'LinkForge — Login Verification Code',
-      html: getLoginEmailHTML(userName, otp),
-    });
+      subject: 'LinkForge - Verify Your Email Address',
+      html: getSignupEmailHTML(userName, otp),
+    },
+    'Signup OTP'
+  );
+};
 
-    console.log('Login OTP email sent successfully. Message ID:', info.messageId);
-    return { id: info.messageId };
-  } catch (error) {
-    console.error('sendLoginOTPEmail failed:', error.message);
-    throw new Error(
-      'Failed to send login OTP email: ' + error.message
-    );
-  }
+const sendLoginOTPEmail = async (toEmail, userName, otp) => {
+  console.log('Sending login OTP email via SMTP', { to: toEmail });
+  return sendWithRetry(
+    {
+      from: mailSender(),
+      to: toEmail,
+      subject: 'LinkForge - Login Verification Code',
+      html: getLoginEmailHTML(userName, otp),
+    },
+    'Login OTP'
+  );
 };
 
 module.exports = {

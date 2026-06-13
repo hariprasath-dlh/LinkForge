@@ -17,8 +17,10 @@ const { generalRateLimiter } = require('./middleware/rateLimiter');
 
 const app = express();
 
-// Trust proxy to ensure express-rate-limit captures client IPs correctly in production (Render)
+// Trust Render/Vercel proxy headers so rate limiting uses the real client IP.
 app.set('trust proxy', 1);
+
+const normalizeOrigin = (url) => url && url.replace(/\/$/, '');
 
 app.use(
   cors({
@@ -32,22 +34,23 @@ app.use(
         'https://linkforge-three.vercel.app',
         'https://linkforge-fymw.onrender.com',
         process.env.CLIENT_URL,
+        process.env.FRONTEND_URL,
+        process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}`,
       ]
         .filter(Boolean)
-        .map(url => url.replace(/\/$/, '')); // Strip trailing slash for exact matching
+        .map(normalizeOrigin);
 
+      const normalizedOrigin = normalizeOrigin(origin);
       const isVercelPreviewURL =
-        origin.includes('linkforge') &&
-        origin.endsWith('.vercel.app');
-
-      const isRenderURL = origin.endsWith('.onrender.com');
-
+        normalizedOrigin.includes('linkforge') &&
+        normalizedOrigin.endsWith('.vercel.app');
+      const isRenderURL = normalizedOrigin.endsWith('.onrender.com');
       const isLocalhost =
-        origin.startsWith('http://localhost:') ||
-        origin.startsWith('http://127.0.0.1:');
+        normalizedOrigin.startsWith('http://localhost:') ||
+        normalizedOrigin.startsWith('http://127.0.0.1:');
 
       if (
-        allowedOrigins.includes(origin) ||
+        allowedOrigins.includes(normalizedOrigin) ||
         isVercelPreviewURL ||
         isRenderURL ||
         isLocalhost
@@ -59,14 +62,7 @@ app.use(
       }
     },
     credentials: true,
-    methods: [
-      'GET',
-      'POST',
-      'PUT',
-      'PATCH',
-      'DELETE',
-      'OPTIONS',
-    ],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',
       'Authorization',
@@ -94,6 +90,7 @@ app.get('/api/health', (req, res) => {
     success: true,
     message: 'LinkForge API is running.',
     timestamp: new Date().toISOString(),
+    database: mongoose.connection.db?.databaseName || null,
   });
 });
 
@@ -107,27 +104,46 @@ app.use(errorMiddleware);
 
 const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI;
+const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true';
 
 const startServer = async () => {
+  if (!MONGODB_URI) {
+    console.error('MONGODB_URI is required. Refusing to start without an explicit database.');
+    process.exit(1);
+  }
+
   try {
-    await mongoose.connect(MONGODB_URI);
-    console.log('✅ MongoDB connected successfully (Atlas)');
-    console.log('📦 Connected to database:', mongoose.connection.db.databaseName);
+    await mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 10000,
+    });
+    console.log('MongoDB connected successfully.');
+    console.log('Connected database:', mongoose.connection.db.databaseName);
   } catch (err) {
-    console.warn(`⚠️ Primary MongoDB connection failed: ${err.message}`);
-    console.log('🔌 Attempting connection to local fallback MongoDB...');
+    console.error(`MongoDB connection failed: ${err.message}`);
+    if (isProduction) {
+      console.error('Production database connection failed. Refusing local fallback to avoid split data.');
+      process.exit(1);
+    }
+
+    console.log('Attempting connection to local fallback MongoDB...');
     try {
-      await mongoose.connect('mongodb://127.0.0.1:27017/linkforge');
-      console.log('✅ Connected successfully to local fallback MongoDB');
+      await mongoose.connect('mongodb://127.0.0.1:27017/linkforge', {
+        serverSelectionTimeoutMS: 5000,
+      });
+      console.log('Connected successfully to local fallback MongoDB');
     } catch (localErr) {
-      console.error('❌ Both primary and local MongoDB connection failed:', localErr.message);
+      console.error('Both primary and local MongoDB connection failed:', localErr.message);
       process.exit(1);
     }
   }
 
   app.listen(PORT, () => {
-    console.log(`🔨 LinkForge server running on http://localhost:${PORT}`);
-    console.log(`📡 Accepting requests from: ${process.env.CLIENT_URL || 'http://localhost:5173'}`);
+    console.log(`LinkForge server running on port ${PORT}`);
+    console.log(
+      `Accepting requests from: ${
+        process.env.CLIENT_URL || process.env.FRONTEND_URL || 'http://localhost:5173'
+      }`
+    );
   });
 };
 

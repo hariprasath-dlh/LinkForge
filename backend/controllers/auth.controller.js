@@ -8,7 +8,24 @@ const {
   sendLoginOTPEmail,
 } = require('../utils/emailService');
 
+const normalizeEmail = (email) =>
+  typeof email === 'string' ? email.trim().toLowerCase() : '';
+
+const authLog = (event, details = {}) => {
+  console.log(`[auth] ${event}`, details);
+};
+
+const restorePreviousOTP = async (user, previousOTP, previousOTPExpiry) => {
+  user.otp = previousOTP || null;
+  user.otpExpiry = previousOTPExpiry || null;
+  await user.save();
+};
+
 const generateToken = (userId) => {
+  if (!process.env.JWT_SECRET) {
+    throw new Error('JWT_SECRET is not configured.');
+  }
+
   return jwt.sign({ userId }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   });
@@ -25,10 +42,17 @@ const register = async (req, res) => {
       });
     }
 
-    const { name, email, password } = req.body;
+    const { name, password } = req.body;
+    const email = normalizeEmail(req.body.email);
+    authLog('register.request', { email });
 
     // Check if email already exists and is verified
     const existingUser = await User.findOne({ email });
+    authLog('register.user_lookup', {
+      email,
+      found: Boolean(existingUser),
+      verified: Boolean(existingUser?.isEmailVerified),
+    });
     if (existingUser && existingUser.isEmailVerified) {
       return res.status(400).json({
         success: false,
@@ -52,6 +76,7 @@ const register = async (req, res) => {
       existingUser.otp = otp;
       existingUser.otpExpiry = otpExpiry;
       user = await existingUser.save();
+      authLog('register.user_updated', { userId: user._id, email });
     } else {
       // Create new user with OTP — not yet verified
       user = await User.create({
@@ -62,6 +87,7 @@ const register = async (req, res) => {
         otpExpiry,
         isEmailVerified: false,
       });
+      authLog('register.user_created', { userId: user._id, email });
     }
 
     // Send OTP email
@@ -72,14 +98,16 @@ const register = async (req, res) => {
       console.error('Error:', emailError.message);
       console.error('To:', email);
       console.error('===========================');
-      await User.findByIdAndDelete(user._id);
-      return res.status(500).json({
-        success: false,
+      return res.status(202).json({
+        success: true,
         message:
-          'Failed to send verification email. ' +
-          'Error: ' + emailError.message,
+          'Account saved, but verification email delivery is delayed. Please use resend OTP.',
+        pendingVerification: true,
+        email: email,
       });
     }
+
+    authLog('register.email_sent', { userId: user._id, email });
 
     return res.status(200).json({
       success: true,
@@ -107,9 +135,17 @@ const login = async (req, res) => {
       });
     }
 
-    const { email, password } = req.body;
+    const { password } = req.body;
+    const email = normalizeEmail(req.body.email);
+    authLog('login.request', { email });
 
     const user = await User.findOne({ email }).select('+password');
+    authLog('login.user_lookup', {
+      email,
+      found: Boolean(user),
+      verified: Boolean(user?.isEmailVerified),
+      locked: Boolean(user?.lockUntil && user.lockUntil > new Date()),
+    });
     if (!user) {
       return res.status(400).json({
         success: false,
@@ -130,6 +166,7 @@ const login = async (req, res) => {
 
     // Password comparison
     const isMatch = await bcrypt.compare(password, user.password);
+    authLog('login.password_compare', { userId: user._id, email, matched: isMatch });
     if (!isMatch) {
       await user.incrementFailedAttempts();
       const attemptsLeft = Math.max(0, 5 - user.failedLoginAttempts);
@@ -148,10 +185,13 @@ const login = async (req, res) => {
     // Generate OTP for login verification
     const otp = generateOTP();
     const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    const previousOTP = user.otp;
+    const previousOTPExpiry = user.otpExpiry;
 
     user.otp = otp;
     user.otpExpiry = otpExpiry;
     await user.save();
+    authLog('login.otp_saved', { userId: user._id, email, expiresAt: otpExpiry });
 
     // Send login OTP email
     try {
@@ -161,13 +201,18 @@ const login = async (req, res) => {
       console.error('Error:', emailError.message);
       console.error('To:', email);
       console.error('==========================');
-      return res.status(500).json({
-        success: false,
+      await restorePreviousOTP(user, previousOTP, previousOTPExpiry);
+      authLog('login.otp_restored_after_email_failure', { userId: user._id, email });
+      return res.status(202).json({
+        success: true,
         message:
-          'Failed to send login OTP. ' +
-          'Error: ' + emailError.message,
+          'Login OTP could not be sent. Please check email service configuration and try resend OTP.',
+        pendingVerification: true,
+        email: email,
       });
     }
+
+    authLog('login.email_sent', { userId: user._id, email });
 
     return res.status(200).json({
       success: true,
@@ -187,7 +232,18 @@ const login = async (req, res) => {
 // POST /api/auth/verify-signup-otp
 const verifySignupOTP = async (req, res) => {
   try {
-    const { email, otp } = req.body;
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: errors.array()[0].msg,
+        errors: errors.array(),
+      });
+    }
+
+    const { otp } = req.body;
+    const email = normalizeEmail(req.body.email);
+    authLog('verify_signup.request', { email });
 
     if (!email || !otp) {
       return res.status(400).json({
@@ -197,6 +253,7 @@ const verifySignupOTP = async (req, res) => {
     }
 
     const user = await User.findOne({ email });
+    authLog('verify_signup.user_lookup', { email, found: Boolean(user) });
     if (!user) {
       return res.status(400).json({
         success: false,
@@ -205,6 +262,12 @@ const verifySignupOTP = async (req, res) => {
     }
 
     const otpCheck = user.isOTPValid(otp);
+    authLog('verify_signup.otp_check', {
+      userId: user._id,
+      email,
+      valid: otpCheck.valid,
+      reason: otpCheck.valid ? undefined : otpCheck.reason,
+    });
     if (!otpCheck.valid) {
       return res.status(400).json({
         success: false,
@@ -217,6 +280,7 @@ const verifySignupOTP = async (req, res) => {
     user.otp = null;
     user.otpExpiry = null;
     await user.save();
+    authLog('verify_signup.verified', { userId: user._id, email });
 
     // Generate JWT token — user is now fully registered
     const token = generateToken(user._id);
@@ -243,7 +307,18 @@ const verifySignupOTP = async (req, res) => {
 // POST /api/auth/verify-login-otp
 const verifyLoginOTP = async (req, res) => {
   try {
-    const { email, otp } = req.body;
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: errors.array()[0].msg,
+        errors: errors.array(),
+      });
+    }
+
+    const { otp } = req.body;
+    const email = normalizeEmail(req.body.email);
+    authLog('verify_login.request', { email });
 
     if (!email || !otp) {
       return res.status(400).json({
@@ -253,6 +328,11 @@ const verifyLoginOTP = async (req, res) => {
     }
 
     const user = await User.findOne({ email });
+    authLog('verify_login.user_lookup', {
+      email,
+      found: Boolean(user),
+      verified: Boolean(user?.isEmailVerified),
+    });
     if (!user) {
       return res.status(400).json({
         success: false,
@@ -261,6 +341,12 @@ const verifyLoginOTP = async (req, res) => {
     }
 
     const otpCheck = user.isOTPValid(otp);
+    authLog('verify_login.otp_check', {
+      userId: user._id,
+      email,
+      valid: otpCheck.valid,
+      reason: otpCheck.valid ? undefined : otpCheck.reason,
+    });
     if (!otpCheck.valid) {
       return res.status(400).json({
         success: false,
@@ -269,7 +355,9 @@ const verifyLoginOTP = async (req, res) => {
     }
 
     // Clear OTP after successful verification
+    user.isEmailVerified = true;
     await user.clearOTP();
+    authLog('verify_login.verified', { userId: user._id, email });
 
     // Generate JWT token — user is now logged in
     const token = generateToken(user._id);
@@ -296,7 +384,18 @@ const verifyLoginOTP = async (req, res) => {
 // POST /api/auth/resend-otp
 const resendOTP = async (req, res) => {
   try {
-    const { email, type } = req.body;
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: errors.array()[0].msg,
+        errors: errors.array(),
+      });
+    }
+
+    const { type } = req.body;
+    const email = normalizeEmail(req.body.email);
+    authLog('resend.request', { email, type });
 
     if (!email) {
       return res.status(400).json({
@@ -306,6 +405,7 @@ const resendOTP = async (req, res) => {
     }
 
     const user = await User.findOne({ email });
+    authLog('resend.user_lookup', { email, type, found: Boolean(user) });
     if (!user) {
       return res.status(400).json({
         success: false,
@@ -316,10 +416,13 @@ const resendOTP = async (req, res) => {
     // Generate new OTP
     const otp = generateOTP();
     const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    const previousOTP = user.otp;
+    const previousOTPExpiry = user.otpExpiry;
 
     user.otp = otp;
     user.otpExpiry = otpExpiry;
     await user.save();
+    authLog('resend.otp_saved', { userId: user._id, email, type, expiresAt: otpExpiry });
 
     // Send OTP based on type (signup or login)
     try {
@@ -330,11 +433,20 @@ const resendOTP = async (req, res) => {
       }
     } catch (emailError) {
       console.error('Resend email failed:', emailError.message);
+      await restorePreviousOTP(user, previousOTP, previousOTPExpiry);
+      authLog('resend.otp_restored_after_email_failure', {
+        userId: user._id,
+        email,
+        type,
+      });
       return res.status(500).json({
         success: false,
-        message: 'Failed to resend OTP. Please try again.',
+        message:
+          'Failed to resend OTP because the email service rejected the request.',
       });
     }
+
+    authLog('resend.email_sent', { userId: user._id, email, type });
 
     return res.status(200).json({
       success: true,

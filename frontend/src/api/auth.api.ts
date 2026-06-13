@@ -13,16 +13,15 @@ interface AuthResponse {
   user?: { id: string; name: string; email: string };
 }
 
-async function authFetch<T = unknown>(
-  path: string,
-  body: Record<string, unknown>,
-): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+async function authFetch<T = unknown>(path: string, body: Record<string, unknown>): Promise<T> {
+  const res = await fetch(`${API_BASE_URL.replace(/\/$/, "")}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const data = await res.json();
+  const data = await res.json().catch(() => ({
+    message: "Request failed. Please try again.",
+  }));
   if (!res.ok) {
     throw new Error(data.message || "Request failed");
   }
@@ -30,11 +29,8 @@ async function authFetch<T = unknown>(
 }
 
 // Register user — returns pendingVerification, no token yet
-export const registerUser = (data: {
-  name: string;
-  email: string;
-  password: string;
-}) => authFetch<AuthResponse>("/api/auth/register", data);
+export const registerUser = (data: { name: string; email: string; password: string }) =>
+  authFetch<AuthResponse>("/api/auth/register", data);
 
 // Login user — returns pendingVerification, no token yet
 export const loginUser = (data: { email: string; password: string }) =>
