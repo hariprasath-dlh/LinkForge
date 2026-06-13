@@ -17,32 +17,29 @@ const { generalRateLimiter } = require('./middleware/rateLimiter');
 
 const app = express();
 
-const allowedOrigins = [
-  process.env.CLIENT_URL,
-  'http://localhost:5173',
-  'http://localhost:8080',
-  'http://localhost:3000',
-].filter(Boolean);
-
 app.use(
   cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (like curl, postman, or mobile apps)
-      if (!origin) return callback(null, true);
-      
-      const isAllowed = allowedOrigins.includes(origin) || 
-                        /^https?:\/\/localhost(:\d+)?$/.test(origin) || 
-                        /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin);
-                        
-      if (isAllowed) {
+    origin: function (origin, callback) {
+      const allowedOrigins = [
+        'http://localhost:5173',
+        'http://localhost:3000',
+        'https://linkforge-three.vercel.app',
+        process.env.CLIENT_URL,
+      ].filter(Boolean);
+
+      if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        callback(new Error('Not allowed by CORS'));
+        callback(new Error('Not allowed by CORS: ' + origin));
       }
     },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
+
+app.options('*', cors());
 
 app.use(helmet());
 app.use(mongoSanitize());
