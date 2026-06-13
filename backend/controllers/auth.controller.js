@@ -68,14 +68,17 @@ const register = async (req, res) => {
     try {
       await sendSignupOTPEmail(email, name, otp);
     } catch (emailError) {
-      console.error('Email send failed:', emailError.message);
-      // Delete the user if email fails so they can try again
+      console.error('=== SIGNUP EMAIL FAILED ===');
+      console.error('Error:', emailError.message);
+      console.error('To:', email);
+      console.error('RESEND_API_KEY set:', !!process.env.RESEND_API_KEY);
+      console.error('===========================');
       await User.findByIdAndDelete(user._id);
       return res.status(500).json({
         success: false,
         message:
           'Failed to send verification email. ' +
-          'Please check your email address and try again.',
+          'Error: ' + emailError.message,
       });
     }
 
@@ -155,11 +158,16 @@ const login = async (req, res) => {
     try {
       await sendLoginOTPEmail(email, user.name, otp);
     } catch (emailError) {
-      console.error('Email send failed:', emailError.message);
+      console.error('=== LOGIN EMAIL FAILED ===');
+      console.error('Error:', emailError.message);
+      console.error('To:', email);
+      console.error('RESEND_API_KEY set:', !!process.env.RESEND_API_KEY);
+      console.error('==========================');
       return res.status(500).json({
         success: false,
         message:
-          'Failed to send verification email. Please try again.',
+          'Failed to send login OTP. ' +
+          'Error: ' + emailError.message,
       });
     }
 
