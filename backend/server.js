@@ -112,6 +112,7 @@ const startServer = async () => {
   try {
     await mongoose.connect(MONGODB_URI);
     console.log('✅ MongoDB connected successfully (Atlas)');
+    console.log('📦 Connected to database:', mongoose.connection.db.databaseName);
   } catch (err) {
     console.warn(`⚠️ Primary MongoDB connection failed: ${err.message}`);
     console.log('🔌 Attempting connection to local fallback MongoDB...');
