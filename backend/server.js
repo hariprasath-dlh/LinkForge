@@ -148,3 +148,23 @@ const startServer = async () => {
 };
 
 startServer();
+
+// Lightweight SMTP health endpoint — returns quick transporter.verify() status
+const expressApp = app;
+expressApp.get('/api/health/smtp', async (req, res) => {
+  try {
+    const emailService = require('./utils/emailService');
+    if (!emailService) return res.status(500).json({ success: false, message: 'Email service unavailable' });
+    // emailService.getTransporter may be async; we expose a quick verify path
+    const start = Date.now();
+    try {
+      // call getTransporter and a short verify by invoking getTransporter which does verify during init
+      await emailService._healthCheck ? emailService._healthCheck() : null;
+      return res.json({ success: true, message: 'SMTP health ok', durationMs: Date.now() - start });
+    } catch (err) {
+      return res.status(502).json({ success: false, message: 'SMTP verify failed', error: err.message });
+    }
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'SMTP health check error', error: err.message });
+  }
+});

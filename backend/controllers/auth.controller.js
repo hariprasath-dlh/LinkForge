@@ -90,28 +90,24 @@ const register = async (req, res) => {
       authLog('register.user_created', { userId: user._id, email });
     }
 
-    // Send OTP email
-    try {
-      await sendSignupOTPEmail(email, name, otp);
-    } catch (emailError) {
-      console.error('=== SIGNUP EMAIL FAILED ===');
-      console.error('Error:', emailError.message);
-      console.error('To:', email);
-      console.error('===========================');
-      return res.status(202).json({
-        success: true,
-        message:
-          'Account saved, but verification email delivery is delayed. Please use resend OTP.',
-        pendingVerification: true,
-        email: email,
-      });
-    }
-
-    authLog('register.email_sent', { userId: user._id, email });
+    // Send OTP email asynchronously (deferred) so HTTP response isn't blocked by any synchronous SMTP setup
+    setImmediate(() => {
+      sendSignupOTPEmail(email, name, otp)
+        .then(() => {
+          authLog('register.email_sent', { userId: user._id, email });
+        })
+        .catch((emailError) => {
+          console.error('=== SIGNUP EMAIL FAILED ===');
+          console.error('Error:', emailError.message);
+          console.error('To:', email);
+          console.error('===========================');
+          authLog('register.email_failed', { userId: user._id, email, error: emailError.message });
+        });
+    });
 
     return res.status(200).json({
       success: true,
-      message: `Verification OTP sent to ${email}. Please check your inbox.`,
+      message: `Verification OTP will be sent to ${email}. Please check your inbox.`,
       pendingVerification: true,
       email: email,
     });
@@ -193,30 +189,25 @@ const login = async (req, res) => {
     await user.save();
     authLog('login.otp_saved', { userId: user._id, email, expiresAt: otpExpiry });
 
-    // Send login OTP email
-    try {
-      await sendLoginOTPEmail(email, user.name, otp);
-    } catch (emailError) {
-      console.error('=== LOGIN EMAIL FAILED ===');
-      console.error('Error:', emailError.message);
-      console.error('To:', email);
-      console.error('==========================');
-      await restorePreviousOTP(user, previousOTP, previousOTPExpiry);
-      authLog('login.otp_restored_after_email_failure', { userId: user._id, email });
-      return res.status(202).json({
-        success: true,
-        message:
-          'Login OTP could not be sent. Please check email service configuration and try resend OTP.',
-        pendingVerification: true,
-        email: email,
-      });
-    }
-
-    authLog('login.email_sent', { userId: user._id, email });
+    // Send login OTP email asynchronously (deferred); restore previous OTP if sending fails
+    setImmediate(() => {
+      sendLoginOTPEmail(email, user.name, otp)
+        .then(() => {
+          authLog('login.email_sent', { userId: user._id, email });
+        })
+        .catch(async (emailError) => {
+          console.error('=== LOGIN EMAIL FAILED ===');
+          console.error('Error:', emailError.message);
+          console.error('To:', email);
+          console.error('==========================');
+          await restorePreviousOTP(user, previousOTP, previousOTPExpiry);
+          authLog('login.otp_restored_after_email_failure', { userId: user._id, email });
+        });
+    });
 
     return res.status(200).json({
       success: true,
-      message: `Login verification OTP sent to ${email}. Please check your inbox.`,
+      message: `Login verification OTP will be sent to ${email}. Please check your inbox.`,
       pendingVerification: true,
       email: email,
     });
