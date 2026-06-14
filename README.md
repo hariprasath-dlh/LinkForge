@@ -187,27 +187,7 @@ Each shortened URL automatically supports:
 ## Architecture Diagram
 
 > 📌 Insert System Architecture Diagram Here
-
-```text
-[ React Frontend ]
-          │
-          ▼
-[ Express REST API ]
-          │
-          ▼
-[ Authentication Layer ]
-          │
-          ▼
-[ MongoDB Atlas ]
-          │
-          ▼
-[ Analytics Engine ]
-          │
-          ▼
-[ Dashboard & Reports ]
-```
-
----
+> <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/16559732-ed5c-43fe-9834-a3c021073cb6" />
 
 # 📁 Project Structure
 
