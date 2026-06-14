@@ -165,6 +165,4 @@ Local: http://localhost:5173
 | Input Validation | express-validator | Invalid/malicious input |
 | User Data Isolation | userId filter on all queries | Data leakage |
 
-## 📄 License
-
-MIT
+Loom video link: https://www.loom.com/share/2f2132d6696b4270920569ad764fcbc5
