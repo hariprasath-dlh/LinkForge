@@ -23,12 +23,16 @@ const smtpConfig = () => {
     throw new Error('SMTP credentials are not configured.');
   }
 
+  const host = process.env.SMTP_HOST || 'smtp-relay.brevo.com';
+  const isGmail = host.includes('gmail.com');
+  const defaultPool = isGmail ? false : true;
+
   return {
-    host: process.env.SMTP_HOST || 'smtp-relay.brevo.com',
+    host,
     port: Number(process.env.SMTP_PORT || 587),
     secure: process.env.SMTP_SECURE === 'true',
     auth: { user, pass },
-    pool: process.env.SMTP_POOL === 'false' ? false : true,
+    pool: process.env.SMTP_POOL === 'true' ? true : (process.env.SMTP_POOL === 'false' ? false : defaultPool),
     maxConnections: Number(process.env.SMTP_MAX_CONNECTIONS || 3),
     maxMessages: Number(process.env.SMTP_MAX_MESSAGES || 100),
     connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 5000),
@@ -99,7 +103,9 @@ const getTransporter = async () => {
           }
         }
       }
-      // If verify fails for other reasons, keep transporter instance but mark it for reinit on auth errors
+      // If verify fails, clear transporter so it will reinit on next attempt
+      transporter = null;
+      throw err;
     } finally {
       initializing = null;
     }
@@ -141,7 +147,7 @@ const sendWithRetry = async (mailOptions, context) => {
 
       console.log(`${context} SMTP send start`, { attempt, to: mailOptions.to });
 
-      const perAttemptTimeout = Number(process.env.SMTP_SEND_TIMEOUT_MS || 5000);
+      const perAttemptTimeout = Number(process.env.SMTP_SEND_TIMEOUT_MS || 15000);
       const sendPromise = transporterInstance.sendMail(mailOptions);
 
       let info;

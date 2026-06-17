@@ -32,17 +32,21 @@ const handleRedirect = async (req, res) => {
       req.socket?.remoteAddress ||
       'unknown';
 
-    await Analytics.create({
-      urlId: url._id,
-      visitedAt: new Date(),
-      ipAddress,
-      userAgent: uaString,
-      browser,
-      device,
-      os,
-    });
+    try {
+      await Analytics.create({
+        urlId: url._id,
+        visitedAt: new Date(),
+        ipAddress,
+        userAgent: uaString,
+        browser,
+        device,
+        os,
+      });
 
-    await URL.findByIdAndUpdate(url._id, { $inc: { totalClicks: 1 } });
+      await URL.findByIdAndUpdate(url._id, { $inc: { totalClicks: 1 } });
+    } catch (analyticsError) {
+      console.error('Failed to log analytics or update clicks:', analyticsError.message);
+    }
 
     return res.redirect(302, url.originalUrl);
   } catch (error) {

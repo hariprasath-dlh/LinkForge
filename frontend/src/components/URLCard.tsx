@@ -79,7 +79,7 @@ export function URLCard({ url, onChanged, onShowQR }: {
       </div>
 
       <a
-        href={url.originalUrl}
+        href={short}
         target="_blank"
         rel="noreferrer"
         className="mt-3 block forge-mono text-forge-amber text-sm sm:text-base hover:underline truncate"

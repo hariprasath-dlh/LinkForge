@@ -14,6 +14,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as StatsShortCodeRouteImport } from './routes/stats.$shortCode'
+import { Route as RShortCodeRouteImport } from './routes/r.$shortCode'
 import { Route as AnalyticsIdRouteImport } from './routes/analytics.$id'
 
 const SignupRoute = SignupRouteImport.update({
@@ -41,6 +42,11 @@ const StatsShortCodeRoute = StatsShortCodeRouteImport.update({
   path: '/stats/$shortCode',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RShortCodeRoute = RShortCodeRouteImport.update({
+  id: '/r/$shortCode',
+  path: '/r/$shortCode',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AnalyticsIdRoute = AnalyticsIdRouteImport.update({
   id: '/analytics/$id',
   path: '/analytics/$id',
@@ -53,6 +59,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/analytics/$id': typeof AnalyticsIdRoute
+  '/r/$shortCode': typeof RShortCodeRoute
   '/stats/$shortCode': typeof StatsShortCodeRoute
 }
 export interface FileRoutesByTo {
@@ -61,6 +68,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/analytics/$id': typeof AnalyticsIdRoute
+  '/r/$shortCode': typeof RShortCodeRoute
   '/stats/$shortCode': typeof StatsShortCodeRoute
 }
 export interface FileRoutesById {
@@ -70,6 +78,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/analytics/$id': typeof AnalyticsIdRoute
+  '/r/$shortCode': typeof RShortCodeRoute
   '/stats/$shortCode': typeof StatsShortCodeRoute
 }
 export interface FileRouteTypes {
@@ -80,6 +89,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/analytics/$id'
+    | '/r/$shortCode'
     | '/stats/$shortCode'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -88,6 +98,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/analytics/$id'
+    | '/r/$shortCode'
     | '/stats/$shortCode'
   id:
     | '__root__'
@@ -96,6 +107,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/analytics/$id'
+    | '/r/$shortCode'
     | '/stats/$shortCode'
   fileRoutesById: FileRoutesById
 }
@@ -105,6 +117,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   SignupRoute: typeof SignupRoute
   AnalyticsIdRoute: typeof AnalyticsIdRoute
+  RShortCodeRoute: typeof RShortCodeRoute
   StatsShortCodeRoute: typeof StatsShortCodeRoute
 }
 
@@ -145,6 +158,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StatsShortCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/r/$shortCode': {
+      id: '/r/$shortCode'
+      path: '/r/$shortCode'
+      fullPath: '/r/$shortCode'
+      preLoaderRoute: typeof RShortCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/analytics/$id': {
       id: '/analytics/$id'
       path: '/analytics/$id'
@@ -161,15 +181,9 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   SignupRoute: SignupRoute,
   AnalyticsIdRoute: AnalyticsIdRoute,
+  RShortCodeRoute: RShortCodeRoute,
   StatsShortCodeRoute: StatsShortCodeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { router } from './router.tsx'
-declare module '@tanstack/react-router' {
-  interface Register {
-    router: typeof router
-  }
-}
