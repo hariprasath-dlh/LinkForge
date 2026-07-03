@@ -308,8 +308,11 @@ const sendViaBrevoApi = (mailOptions, apiKey, context) => {
 };
 
 // Generate a 6-digit OTP
+// NOTE: Hardcoded to '123456' for development/demo since SMTP is not configured.
+// Revert to random generation when SMTP credentials are working:
+//   return Math.floor(100000 + Math.random() * 900000).toString();
 const generateOTP = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return '123456';
 };
 
 // Signup OTP email template

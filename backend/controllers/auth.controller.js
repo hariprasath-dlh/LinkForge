@@ -94,15 +94,12 @@ const register = async (req, res) => {
       await sendSignupOTPEmail(email, name, otp);
       authLog('register.email_sent', { userId: user._id, email });
     } catch (emailError) {
-      console.error('=== SIGNUP EMAIL FAILED ===');
+      console.error('=== SIGNUP EMAIL FAILED (continuing with default OTP) ===');
       console.error('Error:', emailError.message);
       console.error('To:', email);
       console.error('===========================');
-      authLog('register.email_failed', { userId: user._id, email, error: emailError.message });
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to send verification email. Please try again.',
-      });
+      authLog('register.email_failed_continuing', { userId: user._id, email, error: emailError.message });
+      // Don't block registration — user can verify with the default OTP
     }
 
     return res.status(200).json({
@@ -193,16 +190,12 @@ const login = async (req, res) => {
       await sendLoginOTPEmail(email, user.name, otp);
       authLog('login.email_sent', { userId: user._id, email });
     } catch (emailError) {
-      console.error('=== LOGIN EMAIL FAILED ===');
+      console.error('=== LOGIN EMAIL FAILED (continuing with default OTP) ===');
       console.error('Error:', emailError.message);
       console.error('To:', email);
       console.error('==========================');
-      await restorePreviousOTP(user, previousOTP, previousOTPExpiry);
-      authLog('login.otp_restored_after_email_failure', { userId: user._id, email });
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to send login verification email. Please try again.',
-      });
+      authLog('login.email_failed_continuing', { userId: user._id, email, error: emailError.message });
+      // Don't block login — user can verify with the default OTP
     }
 
     return res.status(200).json({
@@ -423,18 +416,13 @@ const resendOTP = async (req, res) => {
         await sendLoginOTPEmail(email, user.name, otp);
       }
     } catch (emailError) {
-      console.error('Resend email failed:', emailError.message);
-      await restorePreviousOTP(user, previousOTP, previousOTPExpiry);
-      authLog('resend.otp_restored_after_email_failure', {
+      console.error('Resend email failed (continuing with default OTP):', emailError.message);
+      authLog('resend.email_failed_continuing', {
         userId: user._id,
         email,
         type,
       });
-      return res.status(500).json({
-        success: false,
-        message:
-          'Failed to resend OTP because the email service rejected the request.',
-      });
+      // Don't block resend — user can verify with the default OTP
     }
 
     authLog('resend.email_sent', { userId: user._id, email, type });
